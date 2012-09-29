@@ -1,10 +1,11 @@
 #include <lualib.h>
 #include <pthread.h>
+#include <uv.h>
 #include "nativethread-priv.h"
 
 typedef struct Proc {
   lua_State *L;
-  pthread_t thread;
+  uv_thread_t thread;
   pthread_cond_t cond;
   const char *channel;
   struct Proc *previous;
@@ -13,7 +14,7 @@ typedef struct Proc {
 
 static Proc *waitsend = NULL;
 static Proc *waitreceive = NULL;
-static pthread_mutex_t kernel_access = PTHREAD_MUTEX_INITIALIZER;
+static uv_mutex_t kernel_access;
 
 static Proc *getself(lua_State *L) {
   Proc *p;
@@ -69,7 +70,7 @@ static int ll_send(lua_State *L) {
   Proc *p;
   const char *channel = luaL_checkstring(L, 1);
 
-  pthread_mutex_lock(&kernel_access);
+  uv_mutex_lock(&kernel_access);
 
   p = searchmatch(channel, &waitreceive);
   if (p) {
@@ -79,7 +80,7 @@ static int ll_send(lua_State *L) {
   } else
     waitonlist(L, channel, &waitsend);
 
-  pthread_mutex_unlock(&kernel_access);
+  uv_mutex_unlock(&kernel_access);
   return 0;
 }
 
@@ -88,7 +89,7 @@ static int ll_receive(lua_State *L) {
   const char *channel = luaL_checkstring(L, 1);
   lua_settop(L, 1);
 
-  pthread_mutex_lock(&kernel_access);
+  uv_mutex_lock(&kernel_access);
 
   p = searchmatch(channel, &waitsend);
   if (p) {
@@ -98,7 +99,7 @@ static int ll_receive(lua_State *L) {
   } else
     waitonlist(L, channel, &waitreceive);
 
-  pthread_mutex_unlock(&kernel_access);
+  uv_mutex_unlock(&kernel_access);
 
   return lua_gettop(L) - 1;
 }
@@ -130,7 +131,7 @@ static void openlibs(lua_State *L) {
   registerlibs(L, libs);
 }
 
-static void *ll_thread(void *arg) {
+static void ll_thread(void *arg) {
   lua_State *L = (lua_State *)arg;
   openlibs(L);
   lua_cpcall(L, luaopen_nativethread, NULL);
@@ -138,11 +139,10 @@ static void *ll_thread(void *arg) {
     fprintf(stderr, "thread error: %s", lua_tostring(L, -1));
   pthread_cond_destroy(&getself(L)->cond);
   lua_close(L);
-  return NULL;
 }
 
 static int ll_start(lua_State *L) {
-  pthread_t thread;
+  uv_thread_t thread;
   const char *chunk = luaL_checkstring(L, 1);
   lua_State *L1 = luaL_newstate();
   if (L1 == NULL)
@@ -151,10 +151,9 @@ static int ll_start(lua_State *L) {
   if (luaL_loadstring(L1, chunk) != 0)
     luaL_error(L, "error starting thread: %s", lua_tostring(L1, -1));
 
-  if (pthread_create(&thread, NULL, ll_thread, L1) != 0)
+  if (uv_thread_create(&thread, ll_thread, L1) != 0)
     luaL_error(L, "unable to create new thread");
 
-  pthread_detach(thread);
   return 0;
 }
 
@@ -172,10 +171,12 @@ static const struct luaL_Reg functions[] = {
 };
 
 int luaopen_nativethread(lua_State *L) {
+  uv_mutex_init(&kernel_access);
+
   Proc *self = (Proc *)lua_newuserdata(L, sizeof(Proc));
   lua_setfield(L, LUA_REGISTRYINDEX, "_SELF");
   self->L = L;
-  self->thread = pthread_self();
+  self->thread = uv_thread_self();
   self->channel = NULL;
   pthread_cond_init(&self->cond, NULL);
   luaL_register(L, "nativethread", functions);
