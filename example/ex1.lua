@@ -2,6 +2,7 @@ local nt = require 'nativethread'
 
 nt.start([[
   local nt = require 'nativethread'
+  local string = require 'string'
   print("Hi, I'm a native thread")
   print("Check if we can use string module. char code of 'a' is " .. string.byte('a'))
   while true do

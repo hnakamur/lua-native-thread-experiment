@@ -1,3 +1,4 @@
+#include <lualib.h>
 #include <pthread.h>
 #include "nativethread-priv.h"
 
@@ -102,9 +103,36 @@ static int ll_receive(lua_State *L) {
   return lua_gettop(L) - 1;
 }
 
+static void registerlibs(lua_State *L, luaL_Reg *libs) {
+  luaL_Reg *reg;
+  lua_getglobal(L, "package");
+  lua_getfield(L, -1, "preload");
+  for (reg = libs; reg->name; ++reg) {
+    lua_pushcfunction(L, reg->func);
+    lua_setfield(L, -2, reg->name);
+  }
+  lua_pop(L, 2);
+}
+
+static luaL_Reg libs[] = {
+  { "io", luaopen_io },
+  { "os", luaopen_os },
+  { "table", luaopen_table },
+  { "string", luaopen_string },
+  { "math", luaopen_math },
+  { "debug", luaopen_debug },
+  { NULL, NULL }
+};
+
+static void openlibs(lua_State *L) {
+  lua_cpcall(L, luaopen_base, NULL);
+  lua_cpcall(L, luaopen_package, NULL);
+  registerlibs(L, libs);
+}
+
 static void *ll_thread(void *arg) {
   lua_State *L = (lua_State *)arg;
-  luaL_openlibs(L);
+  openlibs(L);
   lua_cpcall(L, luaopen_nativethread, NULL);
   if (lua_pcall(L, 0, 0, 0) != 0)
     fprintf(stderr, "thread error: %s", lua_tostring(L, -1));

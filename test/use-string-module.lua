@@ -5,6 +5,7 @@ exports['nativethread.use_string_module'] = function(test)
 
   nt.start([[
     local nt = require 'nativethread'
+    local string = require 'string'
     while true do
       local c = nt.receive('channel1')
       if c == 'EXIT' then
