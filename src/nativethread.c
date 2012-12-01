@@ -3,7 +3,7 @@
 typedef struct Proc {
   lua_State *L;
   uv_thread_t thread;
-  pthread_cond_t cond;
+  uv_cond_t cond;
   const char *channel;
   struct Proc *previous;
   struct Proc *next;
@@ -59,7 +59,7 @@ static void waitonlist(lua_State *L, const char *channel, Proc **list) {
 
   p->channel = channel;
   do {
-    pthread_cond_wait(&p->cond, &kernel_access);
+    uv_cond_wait(&p->cond, &kernel_access);
   } while (p->channel);
 }
 
@@ -73,7 +73,7 @@ static int ll_send(lua_State *L) {
   if (p) {
     movevalues(L, p->L);
     p->channel = NULL;
-    pthread_cond_signal(&p->cond);
+    uv_cond_signal(&p->cond);
   } else
     waitonlist(L, channel, &waitsend);
 
@@ -92,7 +92,7 @@ static int ll_receive(lua_State *L) {
   if (p) {
     movevalues(p->L, L);
     p->channel = NULL;
-    pthread_cond_signal(&p->cond);
+    uv_cond_signal(&p->cond);
   } else
     waitonlist(L, channel, &waitreceive);
 
@@ -148,7 +148,7 @@ static void ll_thread(void *arg) {
   /* call main chunk passed as a string argument */
   if (lua_pcall(L, 0, 0, 0) != 0)
     fprintf(stderr, "thread error: %s", lua_tostring(L, -1));
-  pthread_cond_destroy(&getself(L)->cond);
+  uv_cond_destroy(&getself(L)->cond);
   lua_close(L);
 }
 
@@ -198,7 +198,7 @@ int luaopen_nativethread(lua_State *L) {
   self->L = L;
   self->thread = uv_thread_self();
   self->channel = NULL;
-  pthread_cond_init(&self->cond, NULL);
+  uv_cond_init(&self->cond);
 
   lua_newtable(L);
   setfuncs(L, functions);
