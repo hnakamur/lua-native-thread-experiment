@@ -1,6 +1,3 @@
-#include <lualib.h>
-#include <pthread.h>
-#include <uv.h>
 #include "nativethread-priv.h"
 
 typedef struct Proc {
@@ -126,15 +123,29 @@ static luaL_Reg libs[] = {
 };
 
 static void openlibs(lua_State *L) {
+#if LUA_VERSION_NUM == 502
+  luaL_requiref(L, "base",    luaopen_base, 0);
+  luaL_requiref(L, "package", luaopen_package, 1);
+  lua_pop(L, 2);
+#elif LUA_VERSION_NUM == 501
   lua_cpcall(L, luaopen_base, NULL);
   lua_cpcall(L, luaopen_package, NULL);
+#else
+unsupported_lua_version
+#endif
+
   registerlibs(L, libs);
 }
 
 static void ll_thread(void *arg) {
   lua_State *L = (lua_State *)arg;
   openlibs(L);
-  lua_cpcall(L, luaopen_nativethread, NULL);
+
+  /* open nativethread library */
+  lua_pushcfunction(L, luaopen_nativethread);
+  lua_pcall(L, 0, 0, 0);
+
+  /* call main chunk passed as a string argument */
   if (lua_pcall(L, 0, 0, 0) != 0)
     fprintf(stderr, "thread error: %s", lua_tostring(L, -1));
   pthread_cond_destroy(&getself(L)->cond);
@@ -170,15 +181,27 @@ static const struct luaL_Reg functions[] = {
   { NULL, NULL }
 };
 
+static void setfuncs(lua_State *L, const luaL_Reg *l) {
+  for (; l->name; ++l) {
+    lua_pushcfunction(L, l->func);
+    lua_setfield(L, -2, l->name);
+  }
+}
+
 int luaopen_nativethread(lua_State *L) {
+  Proc *self;
+
   uv_mutex_init(&kernel_access);
 
-  Proc *self = (Proc *)lua_newuserdata(L, sizeof(Proc));
+  self = (Proc *)lua_newuserdata(L, sizeof(Proc));
   lua_setfield(L, LUA_REGISTRYINDEX, "_SELF");
   self->L = L;
   self->thread = uv_thread_self();
   self->channel = NULL;
   pthread_cond_init(&self->cond, NULL);
-  luaL_register(L, "nativethread", functions);
+
+  lua_newtable(L);
+  setfuncs(L, functions);
+
   return 1;
 }

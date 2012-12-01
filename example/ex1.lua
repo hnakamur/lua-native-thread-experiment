@@ -24,3 +24,5 @@ sum = nt.receive('channel2')
 print('sum=' .. sum)
 
 nt.send('channel1', 'EXIT')
+
+while true do end
